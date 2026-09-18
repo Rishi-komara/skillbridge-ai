@@ -1,96 +1,4 @@
-import ai from "../config/gemini.js";
-
-// ==========================================
-// WAIT HELPER
-// ==========================================
-
-const wait = (ms) => {
-  return new Promise((resolve) =>
-    setTimeout(resolve, ms)
-  );
-};
-
-// ==========================================
-// GEMINI REQUEST WITH RETRY
-// ==========================================
-
-const generateWithRetry = async (
-  request,
-  maxAttempts = 3
-) => {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= maxAttempts;
-    attempt++
-  ) {
-    try {
-      console.log(
-        `Skill Gap Gemini attempt ${attempt}/${maxAttempts}`
-      );
-
-      const response =
-        await ai.models.generateContent(
-          request
-        );
-
-      return response;
-    } catch (error) {
-      lastError = error;
-
-      const status =
-        error.status || error.code;
-
-      console.error(
-        `Skill Gap Gemini attempt ${attempt} failed:`,
-        status,
-        error.message
-      );
-
-      // ======================================
-      // 429 = QUOTA / RATE LIMIT
-      // DO NOT RETRY
-      // ======================================
-
-      if (status === 429) {
-        throw error;
-      }
-
-      // ======================================
-      // RETRY TEMPORARY SERVER ERRORS ONLY
-      // ======================================
-
-      const retryable =
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-
-      if (
-        !retryable ||
-        attempt === maxAttempts
-      ) {
-        throw error;
-      }
-
-      // 2 sec -> 4 sec
-      const delay =
-        2000 *
-        Math.pow(2, attempt - 1);
-
-      console.log(
-        `Gemini temporarily unavailable. Retrying in ${
-          delay / 1000
-        } seconds...`
-      );
-
-      await wait(delay);
-    }
-  }
-
-  throw lastError;
-};
+import generateAIResponse from "./aiProviderService.js";
 
 // ==========================================
 // SKILL GAP AI ANALYSIS
@@ -102,6 +10,10 @@ const analyzeSkillGapWithGemini = async (
   missingSkills
 ) => {
   try {
+    // ==========================================
+    // VALIDATION
+    // ==========================================
+
     if (!role) {
       throw new Error(
         "Target role is required"
@@ -116,6 +28,10 @@ const analyzeSkillGapWithGemini = async (
         "Valid skill data is required"
       );
     }
+
+    // ==========================================
+    // PROMPT
+    // ==========================================
 
     const prompt = `
 You are the Skill Gap Analysis assistant
@@ -168,27 +84,34 @@ Return exactly this JSON structure:
 `;
 
     // ==========================================
-    // CALL GEMINI
+    // AI REQUEST
+    //
+    // PRIMARY  : GEMINI
+    // FALLBACK : GROQ
+    //
+    // Gemini 429 -> immediate Groq
+    // Gemini 5xx -> retry -> Groq
     // ==========================================
 
-    const response =
-      await generateWithRetry({
-        model: "gemini-3.6-flash",
-
-        contents: prompt,
-
-        config: {
-          responseMimeType:
-            "application/json",
-        },
+    const result =
+      await generateAIResponse(prompt, {
+        jsonMode: true,
+        maxAttempts: 3,
       });
 
-    const responseText =
-      response.text;
+    const responseText = result.text;
+
+    console.log(
+      `Skill Gap analysis completed using ${result.provider} (${result.model})`
+    );
+
+    // ==========================================
+    // CHECK EMPTY RESPONSE
+    // ==========================================
 
     if (!responseText) {
       throw new Error(
-        "Gemini returned an empty response"
+        "AI provider returned an empty response"
       );
     }
 
@@ -201,46 +124,27 @@ Return exactly this JSON structure:
     try {
       analysis =
         JSON.parse(responseText);
-    } catch {
+    } catch (error) {
+      console.error(
+        "Skill Gap JSON parse error:",
+        error.message
+      );
+
       throw new Error(
-        "Gemini returned invalid JSON"
+        "AI provider returned invalid JSON"
       );
     }
+
+    // ==========================================
+    // RETURN SAME STRUCTURE AS BEFORE
+    // ==========================================
 
     return analysis;
   } catch (error) {
     console.error(
-      "Gemini Skill Gap Analysis Error:",
+      "Skill Gap AI Analysis Error:",
       error.message
     );
-
-    const status =
-      error.status || error.code;
-
-    // ======================================
-    // 429 = QUOTA EXCEEDED
-    // ======================================
-
-    if (status === 429) {
-      throw new Error(
-        "Gemini API quota reached. Please try again after the quota resets."
-      );
-    }
-
-    // ======================================
-    // TEMPORARY SERVER ERROR
-    // ======================================
-
-    if (
-      status === 500 ||
-      status === 502 ||
-      status === 503 ||
-      status === 504
-    ) {
-      throw new Error(
-        "AI service is temporarily unavailable. Please try again in a moment."
-      );
-    }
 
     throw error;
   }

@@ -1,106 +1,4 @@
-import ai from "../config/gemini.js";
-
-// ==========================================
-// WAIT HELPER
-// ==========================================
-
-const wait = (ms) => {
-  return new Promise((resolve) =>
-    setTimeout(resolve, ms)
-  );
-};
-
-// ==========================================
-// GET ERROR STATUS
-// ==========================================
-
-const getErrorStatus = (error) => {
-  return Number(
-    error?.status ||
-      error?.code ||
-      error?.error?.code ||
-      0
-  );
-};
-
-// ==========================================
-// GEMINI REQUEST WITH RETRY
-// ==========================================
-
-const generateWithRetry = async (
-  request,
-  maxAttempts = 3
-) => {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= maxAttempts;
-    attempt++
-  ) {
-    try {
-      console.log(
-        `Mock Interview Gemini attempt ${attempt}/${maxAttempts}`
-      );
-
-      const response =
-        await ai.models.generateContent(
-          request
-        );
-
-      return response;
-    } catch (error) {
-      lastError = error;
-
-      const status =
-        getErrorStatus(error);
-
-      console.error(
-        `Mock Interview Gemini attempt ${attempt} failed:`,
-        status,
-        error.message
-      );
-
-      // 429 = quota/rate limit
-      // Do not retry
-      if (status === 429) {
-        console.log(
-          "Gemini quota/rate limit reached. Retry stopped."
-        );
-
-        throw error;
-      }
-
-      // Retry only temporary server errors
-      const retryableServerError =
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-
-      if (
-        !retryableServerError ||
-        attempt === maxAttempts
-      ) {
-        throw error;
-      }
-
-      const delay =
-        2000 *
-        Math.pow(2, attempt - 1);
-
-      console.log(
-        `Temporary Gemini error. Retrying in ${
-          delay / 1000
-        } seconds...`
-      );
-
-      await wait(delay);
-    }
-  }
-
-  throw lastError;
-};
+import generateAIResponse from "./aiProviderService.js";
 
 // ==========================================
 // VALID INTERVIEW TYPES
@@ -219,19 +117,19 @@ Return exactly this JSON structure:
 `;
 
       // ======================================
-      // GEMINI CALL
+      // AI REQUEST
+      //
+      // PRIMARY  : GEMINI
+      // FALLBACK : GROQ
+      //
+      // Gemini 429 -> immediate Groq
+      // Gemini 5xx -> retry -> Groq
       // ======================================
 
-      const response =
-        await generateWithRetry({
-          model: "gemini-3.6-flash",
-
-          contents: prompt,
-
-          config: {
-            responseMimeType:
-              "application/json",
-          },
+      const aiResult =
+        await generateAIResponse(prompt, {
+          jsonMode: true,
+          maxAttempts: 3,
         });
 
       // ======================================
@@ -239,11 +137,15 @@ Return exactly this JSON structure:
       // ======================================
 
       const responseText =
-        response.text;
+        aiResult.text;
+
+      console.log(
+        `Mock Interview questions generated using ${aiResult.provider} (${aiResult.model})`
+      );
 
       if (!responseText) {
         throw new Error(
-          "Gemini returned empty interview questions"
+          "AI provider returned empty interview questions"
         );
       }
 
@@ -256,9 +158,14 @@ Return exactly this JSON structure:
       try {
         result =
           JSON.parse(responseText);
-      } catch {
+      } catch (error) {
+        console.error(
+          "Mock Interview question JSON parse error:",
+          error.message
+        );
+
         throw new Error(
-          "Gemini returned invalid interview question JSON"
+          "AI provider returned invalid interview question JSON"
         );
       }
 
@@ -273,7 +180,7 @@ Return exactly this JSON structure:
         result.questions.length !== 5
       ) {
         throw new Error(
-          "Gemini did not return exactly 5 interview questions"
+          "AI provider did not return exactly 5 interview questions"
         );
       }
 
@@ -288,7 +195,7 @@ Return exactly this JSON structure:
 
       if (!validQuestions) {
         throw new Error(
-          "Gemini returned invalid interview questions"
+          "AI provider returned invalid interview questions"
         );
       }
 
@@ -315,45 +222,6 @@ Return exactly this JSON structure:
         "Mock Interview Question Generation Error:",
         error.message
       );
-
-      const status =
-        getErrorStatus(error);
-
-      // ======================================
-      // QUOTA ERROR
-      // ======================================
-
-      if (status === 429) {
-        const quotaError =
-          new Error(
-            "Daily AI quota reached. Please try again after the free quota resets."
-          );
-
-        quotaError.status = 429;
-
-        throw quotaError;
-      }
-
-      // ======================================
-      // TEMPORARY GEMINI ERROR
-      // ======================================
-
-      if (
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504
-      ) {
-        const serviceError =
-          new Error(
-            "AI service is temporarily unavailable. Please try again later."
-          );
-
-        serviceError.status =
-          status;
-
-        throw serviceError;
-      }
 
       throw error;
     }
@@ -411,7 +279,7 @@ export const evaluateInterviewAnswers =
       }
 
       // ======================================
-      // PREPARE SAFE DATA FOR GEMINI
+      // PREPARE SAFE DATA FOR AI
       // ======================================
 
       const interviewData =
@@ -502,19 +370,16 @@ Return exactly this JSON structure:
 `;
 
       // ======================================
-      // GEMINI CALL
+      // AI REQUEST
+      //
+      // PRIMARY  : GEMINI
+      // FALLBACK : GROQ
       // ======================================
 
-      const response =
-        await generateWithRetry({
-          model: "gemini-3.6-flash",
-
-          contents: prompt,
-
-          config: {
-            responseMimeType:
-              "application/json",
-          },
+      const aiResult =
+        await generateAIResponse(prompt, {
+          jsonMode: true,
+          maxAttempts: 3,
         });
 
       // ======================================
@@ -522,11 +387,15 @@ Return exactly this JSON structure:
       // ======================================
 
       const responseText =
-        response.text;
+        aiResult.text;
+
+      console.log(
+        `Mock Interview evaluation completed using ${aiResult.provider} (${aiResult.model})`
+      );
 
       if (!responseText) {
         throw new Error(
-          "Gemini returned an empty interview evaluation"
+          "AI provider returned an empty interview evaluation"
         );
       }
 
@@ -539,9 +408,14 @@ Return exactly this JSON structure:
       try {
         result =
           JSON.parse(responseText);
-      } catch {
+      } catch (error) {
+        console.error(
+          "Mock Interview evaluation JSON parse error:",
+          error.message
+        );
+
         throw new Error(
-          "Gemini returned invalid interview evaluation JSON"
+          "AI provider returned invalid interview evaluation JSON"
         );
       }
 
@@ -557,7 +431,7 @@ Return exactly this JSON structure:
           questions.length
       ) {
         throw new Error(
-          "Gemini returned incomplete interview evaluation"
+          "AI provider returned incomplete interview evaluation"
         );
       }
 
@@ -669,46 +543,6 @@ Return exactly this JSON structure:
         "Mock Interview Evaluation Error:",
         error.message
       );
-
-      const status =
-        getErrorStatus(error);
-
-      // ======================================
-      // QUOTA ERROR
-      // ======================================
-
-      if (status === 429) {
-        const quotaError =
-          new Error(
-            "Daily AI quota reached. Please try again after the free quota resets."
-          );
-
-        quotaError.status =
-          429;
-
-        throw quotaError;
-      }
-
-      // ======================================
-      // TEMPORARY GEMINI ERROR
-      // ======================================
-
-      if (
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504
-      ) {
-        const serviceError =
-          new Error(
-            "AI service is temporarily unavailable. Please try again later."
-          );
-
-        serviceError.status =
-          status;
-
-        throw serviceError;
-      }
 
       throw error;
     }

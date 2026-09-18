@@ -1,112 +1,4 @@
-import ai from "../config/gemini.js";
-
-// ==========================================
-// WAIT HELPER
-// ==========================================
-
-const wait = (ms) => {
-  return new Promise((resolve) =>
-    setTimeout(resolve, ms)
-  );
-};
-
-// ==========================================
-// GET ERROR STATUS
-// ==========================================
-
-const getErrorStatus = (error) => {
-  return Number(
-    error?.status ||
-    error?.code ||
-    error?.error?.code ||
-    0
-  );
-};
-
-// ==========================================
-// GEMINI REQUEST WITH RETRY
-// ==========================================
-
-const generateWithRetry = async (
-  request,
-  maxAttempts = 3
-) => {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= maxAttempts;
-    attempt++
-  ) {
-    try {
-      console.log(
-        `Roadmap Gemini attempt ${attempt}/${maxAttempts}`
-      );
-
-      const response =
-        await ai.models.generateContent(request);
-
-      return response;
-    } catch (error) {
-      lastError = error;
-
-      const status =
-        getErrorStatus(error);
-
-      console.error(
-        `Roadmap Gemini attempt ${attempt} failed:`,
-        status,
-        error.message
-      );
-
-      // ======================================
-      // 429 = QUOTA / RATE LIMIT
-      // DO NOT RETRY
-      // ======================================
-
-      if (status === 429) {
-        console.log(
-          "Gemini quota/rate limit reached. Retry stopped."
-        );
-
-        throw error;
-      }
-
-      // ======================================
-      // ONLY TEMPORARY SERVER ERRORS RETRY
-      // ======================================
-
-      const retryableServerError =
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-
-      if (
-        !retryableServerError ||
-        attempt === maxAttempts
-      ) {
-        throw error;
-      }
-
-      const delay =
-        2000 * Math.pow(
-          2,
-          attempt - 1
-        );
-
-      console.log(
-        `Temporary Gemini error. Retrying in ${
-          delay / 1000
-        } seconds...`
-      );
-
-      await wait(delay);
-    }
-  }
-
-  throw lastError;
-};
+import generateAIResponse from "./aiProviderService.js";
 
 // ==========================================
 // GENERATE PERSONALIZED ROADMAP
@@ -206,31 +98,34 @@ Return exactly this JSON structure:
 `;
 
     // ========================================
-    // GEMINI CALL
+    // AI REQUEST
+    //
+    // PRIMARY  : GEMINI
+    // FALLBACK : GROQ
+    //
+    // Gemini 429 -> immediate Groq
+    // Gemini 5xx -> retry -> Groq
     // ========================================
 
-    const response =
-      await generateWithRetry({
-        model: "gemini-3.6-flash",
-
-        contents: prompt,
-
-        config: {
-          responseMimeType:
-            "application/json",
-        },
+    const result =
+      await generateAIResponse(prompt, {
+        jsonMode: true,
+        maxAttempts: 3,
       });
 
     // ========================================
     // RESPONSE TEXT
     // ========================================
 
-    const responseText =
-      response.text;
+    const responseText = result.text;
+
+    console.log(
+      `Roadmap generated using ${result.provider} (${result.model})`
+    );
 
     if (!responseText) {
       throw new Error(
-        "Gemini returned an empty roadmap"
+        "AI provider returned an empty roadmap"
       );
     }
 
@@ -241,60 +136,29 @@ Return exactly this JSON structure:
     let roadmap;
 
     try {
-      roadmap =
-        JSON.parse(responseText);
-    } catch {
+      roadmap = JSON.parse(responseText);
+    } catch (error) {
+      console.error(
+        "Roadmap JSON parse error:",
+        error.message
+      );
+
       throw new Error(
-        "Gemini returned invalid roadmap JSON"
+        "AI provider returned invalid roadmap JSON"
       );
     }
+
+    // ========================================
+    // RETURN ROADMAP
+    // ========================================
 
     return roadmap;
   } catch (error) {
     console.error(
-      "Gemini Roadmap Generation Error:",
+      "AI Roadmap Generation Error:",
       error.message
     );
 
-    const status =
-      getErrorStatus(error);
-
-    // ========================================
-    // QUOTA ERROR
-    // ========================================
-
-    if (status === 429) {
-      const quotaError =
-        new Error(
-          "Daily AI quota reached. Please try again after the free quota resets."
-        );
-
-      quotaError.status = 429;
-
-      throw quotaError;
-    }
-
-    // ========================================
-    // TEMPORARY GEMINI SERVER ERROR
-    // ========================================
-
-    if (
-      status === 500 ||
-      status === 502 ||
-      status === 503 ||
-      status === 504
-    ) {
-      const serviceError =
-        new Error(
-          "AI service is temporarily unavailable. Please try again later."
-        );
-
-      serviceError.status = status;
-
-      throw serviceError;
-    }
-
-    // Other errors
     throw error;
   }
 };

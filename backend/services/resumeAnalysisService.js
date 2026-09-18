@@ -1,97 +1,4 @@
-import ai from "../config/gemini.js";
-
-// ==========================================
-// WAIT HELPER
-// ==========================================
-
-const wait = (ms) => {
-  return new Promise((resolve) =>
-    setTimeout(resolve, ms)
-  );
-};
-
-// ==========================================
-// GEMINI REQUEST WITH RETRY
-// ==========================================
-
-const generateWithRetry = async (
-  request,
-  maxAttempts = 3
-) => {
-  let lastError;
-
-  for (
-    let attempt = 1;
-    attempt <= maxAttempts;
-    attempt++
-  ) {
-    try {
-      console.log(
-        `Gemini request attempt ${attempt}/${maxAttempts}`
-      );
-
-      const response =
-        await ai.models.generateContent(
-          request
-        );
-
-      return response;
-    } catch (error) {
-      lastError = error;
-
-      const status =
-        error.status || error.code;
-
-      console.error(
-        `Gemini attempt ${attempt} failed:`,
-        status,
-        error.message
-      );
-
-      // ======================================
-      // 429 = QUOTA / RATE LIMIT
-      // DO NOT RETRY
-      // ======================================
-
-      if (status === 429) {
-        throw error;
-      }
-
-      // ======================================
-      // RETRY ONLY TEMPORARY SERVER ERRORS
-      // ======================================
-
-      const retryable =
-        status === 500 ||
-        status === 502 ||
-        status === 503 ||
-        status === 504;
-
-      if (
-        !retryable ||
-        attempt === maxAttempts
-      ) {
-        throw error;
-      }
-
-      // Attempt 1 fail -> wait 2 sec
-      // Attempt 2 fail -> wait 4 sec
-      const delay =
-        2000 *
-        Math.pow(2, attempt - 1);
-
-      console.log(
-        `Gemini temporarily unavailable. Retrying in ${
-          delay / 1000
-        } seconds...`
-      );
-
-      await wait(delay);
-    }
-  }
-
-  throw lastError;
-};
+import generateAIResponse from "./aiProviderService.js";
 
 // ==========================================
 // RESUME ANALYSIS
@@ -102,11 +9,19 @@ const analyzeResumeWithGemini = async (
   resumeChecks
 ) => {
   try {
+    // ==========================================
+    // VALIDATION
+    // ==========================================
+
     if (!resumeText) {
       throw new Error(
         "Resume text is required"
       );
     }
+
+    // ==========================================
+    // PROMPT
+    // ==========================================
 
     const prompt = `
 You are a resume analysis assistant for SkillBridge AI,
@@ -162,23 +77,26 @@ Return exactly this JSON structure:
 `;
 
     // ==========================================
-    // CALL GEMINI
+    // AI REQUEST
+    //
+    // PRIMARY  : Gemini
+    // FALLBACK : Groq
+    //
+    // 429 -> immediate Groq fallback
+    // 5xx -> Gemini retry -> Groq fallback
     // ==========================================
 
-    const response =
-      await generateWithRetry({
-        model: "gemini-3.6-flash",
-
-        contents: prompt,
-
-        config: {
-          responseMimeType:
-            "application/json",
-        },
+    const result =
+      await generateAIResponse(prompt, {
+        jsonMode: true,
+        maxAttempts: 3,
       });
 
-    const responseText =
-      response.text;
+    const responseText = result.text;
+
+    console.log(
+      `Resume analysis completed using ${result.provider} (${result.model})`
+    );
 
     // ==========================================
     // CHECK EMPTY RESPONSE
@@ -186,7 +104,7 @@ Return exactly this JSON structure:
 
     if (!responseText) {
       throw new Error(
-        "Gemini returned an empty response"
+        "AI provider returned an empty response"
       );
     }
 
@@ -199,48 +117,28 @@ Return exactly this JSON structure:
     try {
       analysis =
         JSON.parse(responseText);
-    } catch {
+    } catch (error) {
+      console.error(
+        "Resume analysis JSON parse error:",
+        error.message
+      );
+
       throw new Error(
-        "Gemini returned invalid JSON"
+        "AI provider returned invalid JSON"
       );
     }
+
+    // ==========================================
+    // RETURN SAME STRUCTURE AS BEFORE
+    // ==========================================
 
     return analysis;
   } catch (error) {
     console.error(
-      "Gemini Resume Analysis Error:",
+      "Resume Analysis Error:",
       error.message
     );
 
-    const status =
-      error.status || error.code;
-
-    // ======================================
-    // 429 - QUOTA EXCEEDED
-    // ======================================
-
-    if (status === 429) {
-      throw new Error(
-        "Gemini API quota reached. Please try again after the quota resets."
-      );
-    }
-
-    // ======================================
-    // TEMPORARY GEMINI SERVER PROBLEM
-    // ======================================
-
-    if (
-      status === 500 ||
-      status === 502 ||
-      status === 503 ||
-      status === 504
-    ) {
-      throw new Error(
-        "AI service is temporarily unavailable. Please try again in a moment."
-      );
-    }
-
-    // Other errors
     throw error;
   }
 };

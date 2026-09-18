@@ -1,110 +1,109 @@
 import express from "express";
-import ai from "../config/gemini.js";
+import generateAIResponse from "../services/aiProviderService.js";
 import verifyToken from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
 // ==========================================
-// HELPERS
+// AI CONNECTION TEST
 // ==========================================
 
-const getErrorStatus = (error) => {
-  return Number(
-    error?.status ||
-      error?.code ||
-      error?.error?.code ||
-      0
-  );
-};
+router.get(
+  "/test",
+  verifyToken,
+  async (req, res) => {
+    try {
+      console.log(
+        "AI provider connection test started..."
+      );
 
-// ==========================================
-// GEMINI CONNECTION TEST
-// ==========================================
+      const result =
+        await generateAIResponse(
+          "Reply with exactly one short sentence saying SkillBridge AI connection is working.",
+          {
+            jsonMode: false,
+            maxAttempts: 3,
+          }
+        );
 
-router.get("/test", verifyToken, async (req, res) => {
-  try {
-    console.log("Gemini test started...");
+      const text =
+        result.text?.trim();
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents:
-        "Reply with exactly one short sentence saying SkillBridge AI Gemini connection is working.",
-    });
+      if (!text) {
+        return res.status(502).json({
+          success: false,
+          message:
+            "AI provider did not return a response.",
+        });
+      }
 
-    const text = response.text;
+      console.log(
+        `AI test completed using ${result.provider} (${result.model})`
+      );
 
-    console.log("Gemini Response:", text);
-
-    return res.status(200).json({
-      success: true,
-      message: "Gemini AI connected successfully",
-      response: text,
-    });
-  } catch (error) {
-    console.error("Gemini Test Error:", error);
-
-    const status = getErrorStatus(error);
-
-    if (status === 429) {
-      return res.status(429).json({
-        success: false,
+      return res.status(200).json({
+        success: true,
         message:
-          "AI daily quota has been reached. Please try again later.",
+          "AI connected successfully",
+        response: text,
+        provider: result.provider,
       });
-    }
+    } catch (error) {
+      console.error(
+        "AI Connection Test Error:",
+        error.message
+      );
 
-    if ([500, 502, 503, 504].includes(status)) {
       return res.status(503).json({
         success: false,
         message:
-          "AI service is temporarily busy. Please try again later.",
+          "AI services are temporarily unavailable. Please try again later.",
       });
     }
-
-    return res.status(500).json({
-      success: false,
-      message: "Gemini AI connection failed.",
-    });
   }
-});
+);
 
 // ==========================================
 // AI CAREER ASSISTANT
 // ==========================================
 
-router.post("/chat", verifyToken, async (req, res) => {
-  try {
-    const userPrompt = req.body?.userPrompt?.trim();
+router.post(
+  "/chat",
+  verifyToken,
+  async (req, res) => {
+    try {
+      const userPrompt =
+        req.body?.userPrompt?.trim();
 
-    // ----------------------------------------
-    // VALIDATION
-    // ----------------------------------------
+      // ======================================
+      // VALIDATION
+      // ======================================
 
-    if (!userPrompt) {
-      return res.status(400).json({
-        success: false,
-        message: "Please enter a message.",
-      });
-    }
+      if (!userPrompt) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Please enter a message.",
+        });
+      }
 
-    if (userPrompt.length > 2000) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Message is too long. Please keep it under 2000 characters.",
-      });
-    }
+      if (userPrompt.length > 2000) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Message is too long. Please keep it under 2000 characters.",
+        });
+      }
 
-    console.log("AI career assistant request started...");
+      console.log(
+        "AI career assistant request started..."
+      );
 
-    // ----------------------------------------
-    // GEMINI REQUEST
-    // ----------------------------------------
+      // ======================================
+      // PROMPT
+      // ======================================
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-
-      contents: `
+      const prompt = `
 You are SkillBridge AI, a career preparation assistant for students and fresh graduates.
 
 Your purpose is to help with:
@@ -129,64 +128,60 @@ Instructions:
 
 Student message:
 ${userPrompt}
-      `.trim(),
-    });
+      `.trim();
 
-    const text = response.text?.trim();
+      // ======================================
+      // AI REQUEST
+      //
+      // PRIMARY  : GEMINI
+      // FALLBACK : GROQ
+      // ======================================
 
-    if (!text) {
-      return res.status(502).json({
-        success: false,
-        message:
-          "AI did not return a response. Please try again.",
+      const result =
+        await generateAIResponse(
+          prompt,
+          {
+            jsonMode: false,
+            maxAttempts: 3,
+          }
+        );
+
+      // ======================================
+      // RESPONSE
+      // ======================================
+
+      const text =
+        result.text?.trim();
+
+      if (!text) {
+        return res.status(502).json({
+          success: false,
+          message:
+            "AI did not return a response. Please try again.",
+        });
+      }
+
+      console.log(
+        `AI career assistant response generated using ${result.provider} (${result.model})`
+      );
+
+      return res.status(200).json({
+        success: true,
+        response: text,
       });
-    }
+    } catch (error) {
+      console.error(
+        "AI Chat Error:",
+        error.message
+      );
 
-    console.log("AI career assistant response generated.");
-
-    // ----------------------------------------
-    // RESPONSE
-    // ----------------------------------------
-
-    return res.status(200).json({
-      success: true,
-      response: text,
-    });
-  } catch (error) {
-    console.error("AI Chat Error:", error);
-
-    const status = getErrorStatus(error);
-
-    // ----------------------------------------
-    // FREE-TIER QUOTA
-    // ----------------------------------------
-
-    if (status === 429) {
-      return res.status(429).json({
-        success: false,
-        message:
-          "AI daily quota has been reached. Please try again later.",
-      });
-    }
-
-    // ----------------------------------------
-    // TEMPORARY GEMINI ERROR
-    // ----------------------------------------
-
-    if ([500, 502, 503, 504].includes(status)) {
       return res.status(503).json({
         success: false,
         message:
-          "AI service is temporarily busy. Please try again later.",
+          "AI assistant could not respond right now. Please try again later.",
       });
     }
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "AI assistant could not respond. Please try again.",
-    });
   }
-});
+);
 
 export default router;

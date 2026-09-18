@@ -237,7 +237,7 @@ function FloatingAI() {
                   className="
                     m-0
 
-                    text-[12px]
+                    text-[16px]
                     font-semibold
                     text-[#163b38]
                   "
@@ -253,7 +253,7 @@ function FloatingAI() {
                     items-center
                     gap-1.5
 
-                    text-[8px]
+                    text-[12px]
                     text-[#71817e]
                   "
                 >
@@ -339,7 +339,7 @@ function FloatingAI() {
 
                       rounded-[14px]
 
-                      text-[10px]
+                      text-[14px]
                       leading-5
 
                       whitespace-pre-wrap
@@ -451,7 +451,7 @@ function FloatingAI() {
                 m-0
                 mb-2
 
-                text-[8px]
+                text-[12px]
                 font-semibold
                 uppercase
                 tracking-[0.08em]
@@ -495,7 +495,7 @@ function FloatingAI() {
                       border
                       border-[#d8e9e2]
 
-                      text-[8px]
+                      text-[12px]
                       font-medium
                       text-[#0f766e]
 
@@ -576,7 +576,7 @@ function FloatingAI() {
                   px-2.5
                   py-2
 
-                  text-[10px]
+                  text-[14px]
                   leading-5
                   text-[#163b38]
 
@@ -631,7 +631,7 @@ function FloatingAI() {
 
                 text-center
 
-                text-[7px]
+                text-[12px]
                 text-[#a1afac]
               "
             >
@@ -687,7 +687,7 @@ function FloatingAI() {
 
             <span
               className="
-                text-[10px]
+                text-[13px]
                 font-semibold
               "
             >
@@ -703,7 +703,7 @@ function FloatingAI() {
 
             <span
               className="
-                text-[10px]
+                text-[13px]
                 font-semibold
               "
             >
