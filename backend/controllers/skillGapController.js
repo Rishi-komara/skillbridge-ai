@@ -12,11 +12,31 @@ export const getSupportedRoles = async (
   res
 ) => {
   try {
+    // Keep the original flat roles array
+    // for backward compatibility.
     const roles = Object.keys(roleSkills);
+
+    // Group roles using the branch stored
+    // inside roleSkills.js.
+    const branches = {};
+
+    Object.entries(roleSkills).forEach(
+      ([roleName, roleData]) => {
+        const branch =
+          roleData.branch || "Other";
+
+        if (!branches[branch]) {
+          branches[branch] = [];
+        }
+
+        branches[branch].push(roleName);
+      }
+    );
 
     return res.status(200).json({
       success: true,
       roles,
+      branches,
     });
   } catch (error) {
     console.error(
@@ -31,7 +51,6 @@ export const getSupportedRoles = async (
     });
   }
 };
-
 // ==========================================
 // ANALYZE / REUSE SKILL GAP
 // ==========================================
